@@ -56,9 +56,9 @@ namespace de
             bool isConstrained;
         };
 
-        virtual double EvaluteCost(std::vector<double> inputs) const = 0;
-        virtual unsigned int NumberOfParameters() const = 0;
-        virtual std::vector<Constraints> GetConstraints() const = 0;
+        virtual double EvaluteCost(std::vector<double> inputs) = 0;
+        virtual unsigned int NumberOfParameters() = 0;
+        virtual std::vector<Constraints> GetConstraints() = 0;
         virtual ~IOptimizable() {}
     };
 
@@ -77,7 +77,7 @@ namespace de
          * \param callback Optional callback to be called after each optimization iteration has finished.
          * Optimization iteration is defined as processing of single population with SelectionAndCorssing method.
          */
-        DifferentialEvolution(  const IOptimizable& costFunction,
+        DifferentialEvolution(  IOptimizable& costFunction,
                                 unsigned int populationSize,
                                 int randomSeed = 123,
                                 bool shouldCheckConstraints = true,
@@ -322,7 +322,7 @@ namespace de
             return true;
         }
 
-        const IOptimizable& m_cost;
+        IOptimizable& m_cost;
         unsigned int m_populationSize;
         double m_F;
         double m_CR;

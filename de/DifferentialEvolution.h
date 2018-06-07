@@ -62,7 +62,218 @@ namespace de
         virtual ~IOptimizable() {}
     };
 
-    class DifferentialEvolution
+    class DifferentialEvolution {};
+
+    class SimulatedAnnealing : public DifferentialEvolution {
+    public:
+        SimulatedAnnealing(IOptimizable& costFunction,
+            double T0,
+            unsigned int innerIteration,
+            int randomSeed = 123,
+            bool shouldCheckConstraints = true,
+            std::function<void(const DifferentialEvolution&)> callback = nullptr,
+            std::function<bool(const DifferentialEvolution&)> terminationCondition = nullptr) :
+                m_cost(costFunction),
+                m_T(T0),
+                m_CR(0.9),
+                m_innerIteration(innerIteration),
+                m_minCost(-std::numeric_limits<double>::infinity()),
+                m_shouldCheckConstraints(shouldCheckConstraints),
+                m_callback(callback),
+                m_terminationCondition(terminationCondition) {
+
+            m_generator.seed(randomSeed);
+
+            m_numberOfParameters = m_cost.NumberOfParameters();
+
+            m_constraints = costFunction.GetConstraints();
+        }
+
+        void InitSolution() {
+            std::shared_ptr<std::uniform_real_distribution<double>> distribution;
+
+            do {
+                for (int i = 0; i < m_numberOfParameters; i++) {
+                    if (m_constraints[i].isConstrained) {
+                        distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(m_constraints[i].lower, m_constraints[i].upper));
+                    } else {
+                        distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(g_defaultLowerConstraint, g_defaultUpperConstarint));
+                    }
+
+                    m_solution[i] = (*distribution)(m_generator);
+                }
+            } while (!CheckConstraints(m_solution));
+
+            // Initialize minimum cost, best agent and best agent index
+            m_minCost = m_localCost = m_cost.EvaluteCost(m_solution);
+            m_bestAgent = m_solution;
+
+            for (int i = 0; i < m_numberOfParameters; ++i) {
+                double minus = m_constraints[i].upper - m_constraints[i].lower;
+                std::uniform_real_distribution<double> dist(-minus / 8, minus / 8);
+                m_distribution.push_back(dist);
+            }
+        }
+
+        std::vector<double> neighborSolution(std::vector<double> original) {
+            std::vector<double> result(original);
+            for (int i = 0; i > m_numberOfParameters; ++i) {
+                result[i] += m_distribution[i](m_generator);
+            }
+            return result;
+        }
+
+        void annealAtTemperature() {
+            std::uniform_real_distribution<double> neighbor(0, 5);
+
+            for (int i = 0; i < m_innerIteration; ++i) {
+
+                // Form intermediate solution z
+                std::vector<double> z = neighborSolution(m_solution);
+
+                // Chose random R
+                std::uniform_real_distribution<double> distributionParam(0, m_numberOfParameters);
+                int R = distributionParam(m_generator);
+
+                // Chose random r for each dimension
+                std::vector<double> r(m_numberOfParameters);
+                std::uniform_real_distribution<double> distributionPerX(0, 1);
+                for (auto& var : r) {
+                    var = distributionPerX(m_generator);
+                }
+
+                std::vector<double> newX(m_numberOfParameters);
+
+                // Execute crossing
+                for (int i = 0; i < m_numberOfParameters; i++) {
+                    if (r[i] < m_CR || i == R) {
+                        newX[i] = z[i];
+                    } else {
+                        newX[i] = m_solution[i];
+                    }
+                }
+
+                // Check if newX candidate satisfies constraints and skip it if not.
+                // If agent is skipped loop iteration x is decreased so that it is ensured
+                // that the population has constant size (equal to m_populationSize).
+                if (m_shouldCheckConstraints && !CheckConstraints(newX)) {
+                    i--;
+                    continue;
+                }
+
+                // Calculate new cost and decide should the newX be kept.
+                double newCost = m_cost.EvaluteCost(newX);
+                if (newCost < m_localCost || 
+                        distributionPerX(m_generator) < exp(-(newCost - m_localCost) / m_T)) {
+                    m_solution = newX;
+                    m_localCost = newCost;
+                }
+
+                // Track the global best agent.
+                if (newCost < m_minCost) {
+                    m_minCost = newCost;
+                    m_bestAgent = m_solution;
+                }
+            }
+        }
+
+        std::vector<double> GetBestAgent() const {
+            return m_bestAgent;
+        }
+
+        double GetBestCost() const {
+            return m_minCost;
+        }
+
+        std::pair<std::vector<double>, double> GetPopulationWithCosts() const {
+            std::pair<std::vector<double>, double> toRet(m_solution, m_localCost);
+            return toRet;
+        }
+
+        void PrintPopulation() const {
+                for (auto& var : m_solution) {
+                    std::cout << var << " ";
+                }
+                std::cout << std::endl;
+        }
+
+        void Optimize(int iterations, bool verbose = true) {
+            InitSolution();
+
+            // Optimization loop
+            for (int i = 0; i < iterations; i++) {
+                // Optimization step
+                annealAtTemperature();
+                
+                // LowerTemperature
+                m_T *= 0.95;
+
+                if (verbose) {
+                    std::cout << std::fixed << std::setprecision(5);
+                    std::cout << "Current minimal cost: " << m_minCost << "\t\t";
+                    std::cout << "Best agent: ";
+                    for (int i = 0; i < m_numberOfParameters; i++) {
+                        std::cout << m_bestAgent[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+
+                if (m_callback) {
+                    m_callback(*this);
+                }
+
+                if (m_terminationCondition) {
+                    if (m_terminationCondition(*this)) {
+                        if (verbose) {
+                            std::cout << "Terminated due to positive evaluation of the termination condition." << std::endl;
+                        }
+                        return;
+                    }
+                }
+            }
+
+            if (verbose) {
+                std::cout << "Terminated due to exceeding total number of generations." << std::endl;
+            }
+        }
+
+    private:
+        bool CheckConstraints(std::vector<double> agent) {
+            for (int i = 0; i < agent.size(); i++) {
+                if (!m_constraints[i].Check(agent[i])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        IOptimizable& m_cost;
+        double m_T;
+        double m_CR;
+        unsigned int m_innerIteration;
+
+        unsigned int m_numberOfParameters;
+
+        bool m_shouldCheckConstraints;
+
+        std::function<void(const DifferentialEvolution&)> m_callback;
+        std::function<bool(const DifferentialEvolution&)> m_terminationCondition;
+
+        std::default_random_engine m_generator;
+        std::vector<double> m_solution, m_bestAgent;
+
+        std::vector<IOptimizable::Constraints> m_constraints;
+
+        double m_minCost, m_localCost;
+
+        std::vector<std::uniform_real_distribution<double>> m_distribution;
+
+        static constexpr double g_defaultLowerConstraint = -std::numeric_limits<double>::infinity();
+        static constexpr double g_defaultUpperConstarint = std::numeric_limits<double>::infinity();
+    };
+
+    class TrueDifferentialEvolution : public DifferentialEvolution
     {
     public:
         /**
@@ -77,7 +288,7 @@ namespace de
          * \param callback Optional callback to be called after each optimization iteration has finished.
          * Optimization iteration is defined as processing of single population with SelectionAndCorssing method.
          */
-        DifferentialEvolution(  IOptimizable& costFunction,
+        TrueDifferentialEvolution(  IOptimizable& costFunction,
                                 unsigned int populationSize,
                                 int randomSeed = 123,
                                 bool shouldCheckConstraints = true,
@@ -116,19 +327,17 @@ namespace de
 
             for (auto& agent : m_population)
             {
-                for (int i = 0; i < m_numberOfParameters; i++)
-                {
-                    if (m_constraints[i].isConstrained)
-                    {
-                        distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(m_constraints[i].lower, m_constraints[i].upper));
-                    }
-                    else
-                    {
-                        distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(g_defaultLowerConstraint, g_defaultUpperConstarint));
-                    }
+                do {
+                    for (int i = 0; i < m_numberOfParameters; i++) {
+                        if (m_constraints[i].isConstrained) {
+                            distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(m_constraints[i].lower, m_constraints[i].upper));
+                        } else {
+                            distribution = std::make_shared<std::uniform_real_distribution<double>>(std::uniform_real_distribution<double>(g_defaultLowerConstraint, g_defaultUpperConstarint));
+                        }
 
-                    agent[i] = (*distribution)(m_generator);
-                }
+                        agent[i] = (*distribution)(m_generator);
+                    }
+                } while (!CheckConstraints(agent));
             }
 
             // Initialize minimum cost, best agent and best agent index

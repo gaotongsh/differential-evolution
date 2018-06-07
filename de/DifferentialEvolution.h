@@ -62,7 +62,10 @@ namespace de
         virtual ~IOptimizable() {}
     };
 
-    class DifferentialEvolution {};
+    class DifferentialEvolution {
+    public:
+        virtual std::vector<double> GetBestAgent() const = 0;
+    };
 
     class SimulatedAnnealing : public DifferentialEvolution {
     public:
@@ -85,6 +88,7 @@ namespace de
             m_generator.seed(randomSeed);
 
             m_numberOfParameters = m_cost.NumberOfParameters();
+            m_solution.resize(m_numberOfParameters);
 
             m_constraints = costFunction.GetConstraints();
         }
@@ -117,14 +121,13 @@ namespace de
 
         std::vector<double> neighborSolution(std::vector<double> original) {
             std::vector<double> result(original);
-            for (int i = 0; i > m_numberOfParameters; ++i) {
+            for (int i = 0; i < m_numberOfParameters; ++i) {
                 result[i] += m_distribution[i](m_generator);
             }
             return result;
         }
 
         void annealAtTemperature() {
-            std::uniform_real_distribution<double> neighbor(0, 5);
 
             for (int i = 0; i < m_innerIteration; ++i) {
 
@@ -170,8 +173,8 @@ namespace de
                 }
 
                 // Track the global best agent.
-                if (newCost < m_minCost) {
-                    m_minCost = newCost;
+                if (m_localCost < m_minCost) {
+                    m_minCost = m_localCost;
                     m_bestAgent = m_solution;
                 }
             }

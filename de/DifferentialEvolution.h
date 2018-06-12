@@ -57,6 +57,7 @@ namespace de
         };
 
         virtual double EvaluteCost(std::vector<double> inputs) = 0;
+        virtual bool Validate(std::vector<double> inputs) = 0;
         virtual unsigned int NumberOfParameters() = 0;
         virtual std::vector<Constraints> GetConstraints() = 0;
         virtual ~IOptimizable() {}
@@ -203,15 +204,27 @@ namespace de
         void Optimize(int iterations, bool verbose = true) {
             InitSolution();
 
+            time_t time_start, time_end, time_last;
+            time_start = time_last = time_end = time(NULL);
+
             // Optimization loop
             for (int i = 0; i < iterations; i++) {
                 // Optimization step
                 annealAtTemperature();
-                
+
+                time_last = time_end;
+                time_end = time(NULL);
+                // diff-second
+                double time_diff_sec = difftime(time_end, time_start);
+                // print
+                std::cout << ">>> lib: time  diff: " << difftime(time_end, time_last) << std::endl;
+                std::cout << ">>> lib: time  accu: " << difftime(time_end, time_start) << std::endl;
+
                 // LowerTemperature
                 m_T *= 0.95;
 
                 if (verbose) {
+
                     std::cout << std::fixed << std::setprecision(5);
                     std::cout << "Current minimal cost: " << m_minCost << "\t\t";
                     std::cout << "Best agent: ";
@@ -246,8 +259,16 @@ namespace de
                 if (!m_constraints[i].Check(agent[i])) {
                     return false;
                 }
+                if (m_constraints[i].lower == -0.1) {
+                    double xx = agent[i] - m_constraints[i].upper / 2;
+                    double yy = agent[i+1] - m_constraints[i+1].upper / 2;
+                    double r = m_constraints[i].upper / 2;
+                    if (xx > 0 && xx * xx + yy * yy > r * r)
+                        return false;
+                }
             }
 
+            return m_cost.Validate(agent);
             return true;
         }
 
@@ -380,8 +401,10 @@ namespace de
 
                 // Form intermediate solution z
                 std::vector<double> z(m_numberOfParameters);
+                std::uniform_real_distribution<double> distributionPerX(0, 1);
                 for (int i = 0; i < m_numberOfParameters; i ++)
                 {
+                    m_F = 0.5 * (1 + distributionPerX(m_generator));
                     z[i] = m_population[a][i] + m_F * (m_population[b][i] - m_population[c][i]);
                 }
 
@@ -391,7 +414,6 @@ namespace de
 
                 // Chose random r for each dimension
                 std::vector<double> r(m_numberOfParameters);
-                std::uniform_real_distribution<double> distributionPerX(0, 1);
                 for (auto& var : r)
                 {
                     var = distributionPerX(m_generator);
@@ -476,7 +498,11 @@ namespace de
 
         void Optimize(int iterations, bool verbose = true)
         {
+            time_t time_start, time_end, time_last;
+            time_start = time_last = time_end = time(NULL);
+
             InitPopulation();
+            std::cout << "Population Initialized!" << std::endl;
 
             // Optimization loop
             for (int i = 0; i < iterations; i++)
@@ -484,8 +510,23 @@ namespace de
                 // Optimization step
                 SelectionAndCorssing();
 
+                time_last = time_end;
+                time_end = time(NULL);
+                // diff-second
+                double time_diff_sec = difftime(time_end, time_start);
+                // print
+                std::cout << ">>> lib: time  diff: " << difftime(time_end, time_last) << std::endl;
+                std::cout << ">>> lib: time  accu: " << difftime(time_end, time_start) << std::endl;
+
                 if (verbose)
                 {
+                    std::cout << "==== Every Cost there is ====" << std::endl;
+                    for (int i = 0; i < m_populationSize; ++i) {
+                        std::cout << m_minCostPerAgent[i] << " ";
+                    }
+                    std::cout << std::endl;
+                    std::cout << "=============================" << std::endl;
+
                     std::cout << std::fixed << std::setprecision(5);
                     std::cout << "Current minimal cost: " << m_minCost << "\t\t";
                     std::cout << "Best agent: ";
@@ -528,6 +569,13 @@ namespace de
                 if (!m_constraints[i].Check(agent[i]))
                 {
                     return false;
+                }
+                if (m_constraints[i].lower == -0.1) {
+                    double xx = agent[i] - m_constraints[i].upper / 2;
+                    double yy = agent[i + 1] - m_constraints[i + 1].upper / 2;
+                    double r = m_constraints[i].upper / 2;
+                    if (xx > 0 && xx * xx + yy * yy > r * r)
+                        return false;
                 }
             }
 

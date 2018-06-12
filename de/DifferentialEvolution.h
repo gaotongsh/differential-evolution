@@ -579,6 +579,7 @@ namespace de
                 }
             }
 
+            return m_cost.Validate(agent);
             return true;
         }
 
